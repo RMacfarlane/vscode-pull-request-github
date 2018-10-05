@@ -284,7 +284,7 @@ export class PRNode extends TreeNode {
 				this._fileChanges = fileChanges;
 			}
 
-			let result = [new DescriptionNode('Description', {
+			let result = [new DescriptionNode('Overview', {
 				light: Resource.icons.light.Description,
 				dark: Resource.icons.dark.Description
 			}, this.pullRequestModel), ...this._fileChanges];
