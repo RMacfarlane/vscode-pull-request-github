@@ -73,7 +73,6 @@ export class PRDocumentCommentProvider implements vscode.DocumentCommentProvider
 			throw new Error(`Couldn't find document provider`);
 		}
 
-
 		return await this._prDocumentCommentProviders[params.prNumber].editComment(document, comment, text, token);
 	}
 
