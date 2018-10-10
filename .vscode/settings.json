@@ -1,4 +1,5 @@
 {
 	"files.trimTrailingWhitespace": true,
-	"editor.insertSpaces": false
+	"editor.insertSpaces": false,
+	"githubPullRequests.telemetry.optout": false
 }
