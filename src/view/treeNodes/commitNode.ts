@@ -14,6 +14,7 @@ import { Comment } from '../../common/comment';
 
 export class CommitNode extends TreeNode implements vscode.TreeItem {
 	public label: string;
+	public iconPath: vscode.Uri;
 	public collapsibleState: vscode.TreeItemCollapsibleState;
 
 	constructor(
@@ -25,6 +26,9 @@ export class CommitNode extends TreeNode implements vscode.TreeItem {
 		super();
 		this.label = commit.commit.message;
 		this.collapsibleState = vscode.TreeItemCollapsibleState.Collapsed;
+		this.iconPath = commit.author && commit.author.avatar_url
+			? vscode.Uri.parse(`${commit.author.avatar_url}&s=64`)
+			: undefined;
 	}
 
 	getTreeItem(): vscode.TreeItem {
