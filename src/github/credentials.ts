@@ -17,6 +17,7 @@ const SIGNIN_COMMAND = 'Sign in';
 
 export class CredentialStore {
 	private _octokits: Map<string, Octokit>;
+	private _logins: Map<string, string>;
 	private _configuration: VSCodeConfiguration;
 	private _authenticationStatusBarItems: Map<string, vscode.StatusBarItem>;
 
@@ -24,6 +25,7 @@ export class CredentialStore {
 		private readonly _telemetry: ITelemetry) {
 		this._configuration = configuration;
 		this._octokits = new Map<string, Octokit>();
+		this._logins = new Map<string, string>();
 		this._authenticationStatusBarItems = new Map<string, vscode.StatusBarItem>();
 	}
 
@@ -67,6 +69,18 @@ export class CredentialStore {
 		const normalizedUri = remote.gitProtocol.normalizeUri();
 		const host = `${normalizedUri.scheme}://${normalizedUri.authority}`;
 		return this._octokits.get(host);
+	}
+
+	public getLogin(remote: Remote): string {
+		const normalizedUri = remote.gitProtocol.normalizeUri();
+		const host = `${normalizedUri.scheme}://${normalizedUri.authority}`;
+		return this._logins.get(host);
+	}
+
+	public setLogin(remote: Remote, login: string): void {
+		const normalizedUri = remote.gitProtocol.normalizeUri();
+		const host = `${normalizedUri.scheme}://${normalizedUri.authority}`;
+		this._logins.set(host, login);
 	}
 
 	public async loginWithConfirmation(remote: Remote): Promise<Octokit> {
@@ -130,6 +144,10 @@ export class CredentialStore {
 		return octokit;
 	}
 
+	public isCurrentUser(username: string, remote: Remote): boolean {
+		return username === this.getLogin(remote);
+	}
+
 	private createOctokit(type: string, creds: IHostConfiguration): Octokit {
 		const octokit = new Octokit({
 			baseUrl: `${HostHelper.getApiHost(creds).toString().slice(0, -1)}${HostHelper.getApiPath(creds, '')}`,
@@ -162,6 +180,7 @@ export class CredentialStore {
 			try {
 				const user = await octokit.users.get({});
 				text = `$(mark-github) ${user.data.login}`;
+				this.setLogin(remote, user.data.login);
 			} catch (e) {
 				text = '$(mark-github) Signed in';
 			}

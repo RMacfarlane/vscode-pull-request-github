@@ -83,7 +83,9 @@ export async function activate(context: vscode.ExtensionContext) {
 	if (firstSelectedRepository) {
 		await init(context, git, firstSelectedRepository);
 	} else {
-		const onDidOpenRelevantRepository = filterEvent(git.onDidOpenRepository, r => r.ui.selected);
+		const onDidOpenRelevantRepository = filterEvent(git.onDidOpenRepository, r => {
+			return r.ui.selected;
+		});
 		onceEvent(onDidOpenRelevantRepository)(r => init(context, git, r));
 	}
 }

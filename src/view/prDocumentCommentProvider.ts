@@ -10,7 +10,7 @@ import { fromPRUri } from '../common/uri';
 
 export class PRDocumentCommentProvider implements vscode.DocumentCommentProvider {
 	private _onDidChangeCommentThreads: vscode.EventEmitter<vscode.CommentThreadChangedEvent> = new vscode.EventEmitter<vscode.CommentThreadChangedEvent>();
-	public onDidChangeCommentThreads?: vscode.Event<vscode.CommentThreadChangedEvent> = this._onDidChangeCommentThreads.event;
+	public onDidChangeCommentThreads: vscode.Event<vscode.CommentThreadChangedEvent> = this._onDidChangeCommentThreads.event;
 
 	private _prDocumentCommentProviders: {[key: number]: vscode.DocumentCommentProvider} = {};
 
@@ -63,6 +63,28 @@ export class PRDocumentCommentProvider implements vscode.DocumentCommentProvider
 		}
 
 		return await this._prDocumentCommentProviders[params.prNumber].replyToCommentThread(document, range, commentThread, text, token);
+	}
+
+	async editComment(document: vscode.TextDocument, comment: vscode.Comment, text: string, token: vscode.CancellationToken): Promise<void> {
+		let uri = document.uri;
+		let params = fromPRUri(uri);
+
+		if (!this._prDocumentCommentProviders[params.prNumber]) {
+			throw new Error(`Couldn't find document provider`);
+		}
+
+		return await this._prDocumentCommentProviders[params.prNumber].editComment(document, comment, text, token);
+	}
+
+	async deleteComment(document: vscode.TextDocument, comment: vscode.Comment, token: vscode.CancellationToken): Promise<void> {
+		let uri = document.uri;
+		let params = fromPRUri(uri);
+
+		if (!this._prDocumentCommentProviders[params.prNumber]) {
+			return null;
+		}
+
+		return await this._prDocumentCommentProviders[params.prNumber].deleteComment(document, comment, token);
 	}
 }
 

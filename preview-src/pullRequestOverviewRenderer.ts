@@ -72,8 +72,9 @@ export interface Comment {
 	updated_at: string;
 	html_url: string;
 	absolutePosition?: number;
+	canEdit: boolean;
+	canDelete: boolean;
 }
-
 
 export enum EventType {
 	Committed,
@@ -228,57 +229,176 @@ function groupBy<T>(arr: T[], fn: (el: T) => string): { [key: string]: T[] } {
 	}, Object.create(null));
 }
 
-export function renderComment(comment: CommentEvent | Comment): string {
-	return `<div class="comment-container" data-type="comment">
+function renderUserIcon(iconLink: string, iconSrc: string): HTMLElement {
+	const iconContainer = document.createElement('div');
+	iconContainer.className = 'avatar-container';
 
-	<div class="review-comment" role="treeitem">
-		<div class="review-comment-contents comment">
-			<div class="avatar-container">
-				<a class="avatar-link" href="${comment.user.html_url}"><img class="avatar" src="${comment.user.avatar_url}"></a>
-			</div>
-			<div class="review-comment-container">
-				<div class="review-comment-header">
-					<a class="author" href="${comment.user.html_url}">${comment.user.login}</a>
-					<div class="timestamp">${moment(comment.created_at).fromNow()}</div>
-				</div>
-				<div class="comment-body">
-					${md.render(emoji.emojify(comment.body))}
-				</div>
-			</div>
-		</div>
-	</div>
-</div>`;
+	const avatarLink = document.createElement('a');
+	avatarLink.className = 'avatar-link';
+	(<HTMLAnchorElement>avatarLink).href = iconLink;
+
+	const avatar = document.createElement('img');
+	avatar.className = 'avatar';
+	(<HTMLImageElement>avatar).src = iconSrc;
+
+	iconContainer.appendChild(avatarLink).appendChild(avatar);
+
+	return iconContainer;
 }
 
-export function renderCommit(timelineEvent: CommitEvent): string {
+export function renderComment(comment: CommentEvent | Comment, postMessage: (args: any) => void): HTMLElement {
+	const commentContainer = document.createElement('div');
+	commentContainer.classList.add('comment-container', 'comment');
+	const userIcon = renderUserIcon(comment.user.html_url, comment.user.avatar_url);
+	const reviewCommentContainer = document.createElement('div');
+	reviewCommentContainer.className = 'review-comment-container';
+	commentContainer.appendChild(userIcon);
+	commentContainer.appendChild(reviewCommentContainer);
 
+	const commentHeader = document.createElement('div');
+	commentHeader.className = 'review-comment-header';
+	const authorLink = document.createElement('a');
+	authorLink.className = 'author';
+	(<HTMLAnchorElement>authorLink).href = comment.user.html_url;
+	authorLink.textContent = comment.user.login;
+
+	const timestamp = document.createElement('div');
+	timestamp.className = 'timestamp';
+	timestamp.textContent = moment(comment.created_at).fromNow();
+
+	const commentBody = document.createElement('div');
+	commentBody.className = 'comment-body';
+	commentBody.innerHTML  = md.render(emoji.emojify(comment.body));
+
+	commentHeader.appendChild(authorLink);
+	commentHeader.appendChild(timestamp);
+	const actions = renderActions(comment as Comment, commentBody, postMessage);
+	if (actions) {
+		commentHeader.appendChild(actions);
+	}
+
+	reviewCommentContainer.appendChild(commentHeader);
+	reviewCommentContainer.appendChild(commentBody);
+
+	return commentContainer;
+}
+
+function renderActions(comment: Comment, commentBody: HTMLElement, postMessage: (args: any) => void): HTMLElement | undefined {
+	if (!comment.canEdit && !comment.canDelete) {
+		return undefined;
+	}
+
+	const actionBar = document.createElement('div');
+	actionBar.className = 'comment-actions';
+
+	if (comment.canEdit) {
+		const editButton = document.createElement('button');
+		editButton.innerHTML = `<svg class="octicon octicon-pencil" viewBox="0 0 14 16" version="1.1" width="14" height="16" aria-hidden="true">
+			<path fill-rule="evenodd" d="M0 12v3h3l8-8-3-3-8 8zm3 2H1v-2h1v1h1v1zm10.3-9.3L12 6 9 3l1.3-1.3a.996.996 0 0 1 1.41 0l1.59 1.59c.39.39.39 1.02 0 1.41z"></path>
+		</svg>`;
+		editButton.onclick = (e) => {
+			editButton.disabled = true;
+			const editingContainer = document.createElement('div');
+			editingContainer.className = 'editing-form';
+			const editingArea = document.createElement('textarea');
+			editingArea.value = comment.body;
+
+			commentBody.classList.add('hidden');
+
+			const cancelButton = document.createElement('button');
+			cancelButton.textContent = 'Cancel';
+			cancelButton.onclick = () => {
+				editingContainer.remove();
+				commentBody.classList.remove('hidden');
+			};
+
+			const updateButton = document.createElement('button');
+			updateButton.textContent = 'Update comment';
+			updateButton.onclick = () => {
+				postMessage({
+					command: 'pr.editComment',
+					text: editingArea.value
+				});
+
+				updateButton.textContent = 'Updating comment...';
+				updateButton.disabled = true;
+				editButton.disabled = false;
+			};
+
+			const buttons = document.createElement('div');
+			buttons.className = 'form-actions';
+			buttons.appendChild(cancelButton);
+			buttons.appendChild(updateButton);
+
+			(<any>editingContainer).append(editingArea, buttons);
+			commentBody.parentElement!.appendChild(editingContainer);
+			editingArea.focus();
+		};
+
+		actionBar.appendChild(editButton);
+	}
+
+	if (comment.canDelete) {
+		const deleteButton = document.createElement('button');
+		deleteButton.innerHTML = `<svg class="octicon octicon-x" viewBox="0 0 12 16" version="1.1" width="12" height="16" aria-hidden="true">
+			<path fill-rule="evenodd" d="M7.48 8l3.75 3.75-1.48 1.48L6 9.48l-3.75 3.75-1.48-1.48L4.52 8 .77 4.25l1.48-1.48L6 6.52l3.75-3.75 1.48 1.48L7.48 8z"></path>
+		</svg>`;
+
+		deleteButton.addEventListener('click', () => {
+			postMessage({
+				command: 'pr.delete-comment',
+				comment: comment
+			});
+		});
+
+		actionBar.appendChild(deleteButton);
+	}
+
+	return actionBar;
+}
+
+
+export function renderCommit(timelineEvent: CommitEvent): HTMLElement {
 	const shaShort = timelineEvent.sha.substring(0, 7);
-	const avatar = timelineEvent.author.avatar_url
-		? `<div class="avatar-container"><a class="avatar-link" href="${timelineEvent.author.html_url}"><img class="avatar" src="${timelineEvent.author.avatar_url}"></a></div>`
-		: '';
-	const login = timelineEvent.author.login
-		? `<a class="author" href="${timelineEvent.author.html_url}">${timelineEvent.author.login}</a>`
-		: timelineEvent.author.name;
 
-	return `<div class="comment-container"  data-type="commit">
+	const commentContainer = document.createElement('div');
+	commentContainer.classList.add('comment-container', 'commit');
+	const commitMessage = document.createElement('div');
+	commitMessage.className = 'commit-message';
 
-	<div class="review-comment" role="treeitem">
-		<div class="review-comment-contents commit">
-			<div class="commit">
-				<div class="commit-message">
-					<svg class="octicon octicon-git-commit" width="14" height="16" viewBox="0 0 14 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-						<path fill-rule="evenodd" clip-rule="evenodd" d="M10.86 3C10.41 1.28 8.86 0 7 0C5.14 0 3.59 1.28 3.14 3H0V5H3.14C3.59 6.72 5.14 8 7 8C8.86 8 10.41 6.72 10.86 5H14V3H10.86V3ZM7 6.2C5.78 6.2 4.8 5.22 4.8 4C4.8 2.78 5.78 1.8 7 1.8C8.22 1.8 9.2 2.78 9.2 4C9.2 5.22 8.22 6.2 7 6.2V6.2Z" transform="translate(0 4)"/>
-					</svg>
-					${avatar}
-					<div class="message">
-						${login} ${timelineEvent.message}
-					</div>
-				</div>
-				<a class="sha" href="${timelineEvent.html_url}">${shaShort}</a>
-			</div>
-		</div>
-	</div>
-</div>`;
+	const commitIcon = document.createElement('span');
+	commitIcon.innerHTML = `<svg class="octicon octicon-git-commit" width="14" height="16" viewBox="0 0 14 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+		<path fill-rule="evenodd" clip-rule="evenodd" d="M10.86 3C10.41 1.28 8.86 0 7 0C5.14 0 3.59 1.28 3.14 3H0V5H3.14C3.59 6.72 5.14 8 7 8C8.86 8 10.41 6.72 10.86 5H14V3H10.86V3ZM7 6.2C5.78 6.2 4.8 5.22 4.8 4C4.8 2.78 5.78 1.8 7 1.8C8.22 1.8 9.2 2.78 9.2 4C9.2 5.22 8.22 6.2 7 6.2V6.2Z" transform="translate(0 4)"/>
+	</svg>`;
+
+	commitMessage.appendChild(commitIcon);
+
+	const message = document.createElement('div');
+	message.className = 'message';
+	if (timelineEvent.author.html_url && timelineEvent.author.avatar_url) {
+		const userIcon = renderUserIcon(timelineEvent.author.html_url, timelineEvent.author.avatar_url);
+		commitMessage.appendChild(userIcon);
+
+		const login = document.createElement('a');
+		login.className = 'author';
+		(<HTMLAnchorElement>login).href = timelineEvent.author.html_url;
+		login.textContent = timelineEvent.author.login!;
+		commitMessage.appendChild(login);
+		message.textContent = timelineEvent.message;
+	} else {
+		message.textContent = `${timelineEvent.author.name} ${timelineEvent.message}`;
+	}
+
+	commitMessage.appendChild(message);
+
+	const sha = document.createElement('a');
+	sha.className = 'sha';
+	(<HTMLAnchorElement>sha).href = timelineEvent.html_url;
+	sha.textContent = shaShort;
+
+	(<any>commentContainer).append(commitMessage, sha);
+
+	return commentContainer;
 }
 
 function getDiffChangeClass(type: DiffChangeType) {
@@ -296,41 +416,68 @@ function getDiffChangeClass(type: DiffChangeType) {
 	}
 }
 
-export function renderReview(timelineEvent: ReviewEvent): string {
-	if (timelineEvent.state === "pending") {
-		return '';
+export function renderReview(timelineEvent: ReviewEvent, postMessage: (args: any) => void): HTMLElement | undefined {
+	if (timelineEvent.state === 'pending') {
+		return undefined;
 	}
 
-	let reviewState = '';
+	const commentContainer = document.createElement('div');
+	commentContainer.classList.add('comment-container', 'comment');
+	const userIcon = renderUserIcon(timelineEvent.user.html_url, timelineEvent.user.avatar_url);
+	const reviewCommentContainer = document.createElement('div');
+	reviewCommentContainer.className = 'review-comment-container';
+	commentContainer.appendChild(userIcon);
+	commentContainer.appendChild(reviewCommentContainer);
+
+	const commentHeader = document.createElement('div');
+	commentHeader.className = 'review-comment-header';
+
+	const userLogin = document.createElement('a');
+	(<HTMLAnchorElement>userLogin).href = timelineEvent.user.html_url;
+	userLogin.textContent = timelineEvent.user.login;
+
+	const reviewState = document.createElement('span');
 	switch (timelineEvent.state.toLowerCase()) {
 		case 'approved':
-			reviewState = `<span><a href="${timelineEvent.user.html_url}">${timelineEvent.user.login}</a> approved these changes</span>`;
+			reviewState.textContent = ` approved these changes`;
 			break;
 		case 'commented':
-			reviewState = `<span><a href="${timelineEvent.user.html_url}">${timelineEvent.user.login}</a> reviewed</span>`;
+			reviewState.textContent = ` reviewed`;
 			break;
 		case 'changes_requested':
-			reviewState = `<span><a href="${timelineEvent.user.html_url}">${timelineEvent.user.login}</a> requested changes</span>`;
+			reviewState.textContent = ` requested changes`;
 			break;
 		default:
 			break;
 	}
 
-	let reviewBody = timelineEvent.body ? `${md.render(emoji.emojify(timelineEvent.body))}` : '';
+	const timestamp = document.createElement('div');
+	timestamp.className = 'timestamp';
+	timestamp.textContent = moment(timelineEvent.submitted_at).fromNow();
 
-	let body = '';
+	(<any>commentHeader).append(userLogin, reviewState, timestamp);
+
+	const reviewBody = document.createElement('div');
+	reviewBody.className = 'review-body';
+	if (timelineEvent.body) {
+		reviewBody.innerHTML = md.render(emoji.emojify(timelineEvent.body));
+	}
+
+	let commentBody;
 	if (timelineEvent.comments) {
+		commentBody = document.createElement('div');
+		commentBody.className = 'comment-body';
 		let groups = groupBy(timelineEvent.comments, comment => comment.path + ':' + (comment.position !== null ? `pos:${comment.position}` : `ori:${comment.original_position}`));
 
 		for (let path in groups) {
 			let comments = groups[path];
-			let diffView = '';
-			let diffLines: string[] = [];
+			let diffView;
+			let diffLines: HTMLElement[] = [];
 			if (comments && comments.length) {
 				for (let i = 0; i < comments[0].diff_hunks.length; i++) {
 					diffLines = comments[0].diff_hunks[i].diffLines.slice(-4).map(diffLine => {
 						const diffLineElement = document.createElement('div');
-						diffLineElement.classList.add(...['diffLine',  getDiffChangeClass(diffLine.type)]);
+						diffLineElement.classList.add('diffLine',  getDiffChangeClass(diffLine.type));
 
 						const oldLineNumber = document.createElement('span');
 						oldLineNumber.textContent = diffLine.oldLineNumber > 0 ? diffLine.oldLineNumber.toString() : ' ';
@@ -348,59 +495,50 @@ export function renderReview(timelineEvent: ReviewEvent): string {
 						diffLineElement.appendChild(newLineNumber);
 						diffLineElement.appendChild(lineContent);
 
-						return diffLineElement.outerHTML;
+						return diffLineElement;
 					});
 				}
 
-				diffView = `<div class="diff">
-					<div class="diffHeader">${comments[0].path}</div>
-					${diffLines.join('')}
-				</div>`;
+				diffView = document.createElement('div');
+				diffView.className = 'diff';
+				const diffHeader = document.createElement('div');
+				diffHeader.className = 'diffHeader';
+				diffHeader.textContent = comments[0].path;
+
+				diffView.appendChild(diffHeader);
+				(<any>diffView).append(...diffLines);
 			}
 
-			body += `
-				${diffView}
-				<div data-type="review-comment">${ comments && comments.length ? comments.map(comment => renderComment(comment)).join('') : ''}</div>
-			`;
+			if (diffView) {
+				commentBody.appendChild(diffView);
+			}
+
+			(<any>commentBody).append(...comments.map(comment => renderComment(comment, postMessage)));
 		}
 	}
 
-	return `<div class="comment-container"  data-type="review">
+	(<any>reviewCommentContainer).append(commentHeader, reviewBody);
 
-	<div class="review-comment" role="treeitem">
+	if (commentBody) {
+		reviewCommentContainer.appendChild(commentBody);
+	}
 
-		<div class="review-comment-contents review">
-			<div class="avatar-container">
-				<a class="avatar-link" href="${timelineEvent.user.html_url}"><img class="avatar" src="${timelineEvent.user.avatar_url}"></a>
-			</div>
-			<div class="review-comment-container">
-				<div class="review-comment-header">
-					${reviewState}
-					<div class="timestamp">${moment(timelineEvent.submitted_at).fromNow()}</div>
-				</div>
-				<div class="review-body">
-					${reviewBody}
-				</div>
-				<div class="comment-body">
-					${body}
-				</div>
-			</div>
-		</div>
+	(<any>commentContainer).append(userIcon, reviewCommentContainer);
 
-	</div>
-</div>`;
+	return commentContainer;
 }
 
-export function renderTimelineEvent(timelineEvent: TimelineEvent): string {
+export function renderTimelineEvent(timelineEvent: TimelineEvent, postMessage: (args: any) => void): HTMLElement | undefined {
 	switch (timelineEvent.event) {
 		case EventType.Committed:
 			return renderCommit((<CommitEvent>timelineEvent));
 		case EventType.Commented:
-			return renderComment((<CommentEvent>timelineEvent));
+			return renderComment((<CommentEvent>timelineEvent), postMessage);
 		case EventType.Reviewed:
-			return renderReview((<ReviewEvent>timelineEvent));
+			return renderReview((<ReviewEvent>timelineEvent), postMessage);
+		default:
+			return undefined;
 	}
-	return '';
 }
 
 export function getStatusBGCoor(state: PullRequestStateEnum) {
