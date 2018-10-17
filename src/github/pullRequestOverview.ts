@@ -6,11 +6,9 @@
 
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { IPullRequest, IPullRequestManager, IPullRequestModel, Commit, MergePullRequest, PullRequestStateEnum } from './interface';
+import { IPullRequest, IPullRequestManager, IPullRequestModel, MergePullRequest, PullRequestStateEnum } from './interface';
+import { formatError } from '../common/utils';
 import { onDidUpdatePR } from '../commands';
-import { TimelineEvent, EventType, ReviewEvent, CommitEvent } from '../common/timelineEvent';
-import { Comment } from '../common/comment';
-import { groupBy, formatError } from '../common/utils';
 import { GitErrorCodes } from '../typings/git';
 
 export class PullRequestOverviewPanel {
@@ -121,15 +119,11 @@ export class PullRequestOverviewPanel {
 
 			Promise.all(
 				[
-					this._pullRequestManager.getPullRequestCommits(pullRequestModel),
 					this._pullRequestManager.getTimelineEvents(pullRequestModel),
-					this._pullRequestManager.getPullRequestComments(pullRequestModel),
 					this._pullRequestManager.getPullRequestRepositoryDefaultBranch(pullRequestModel)
 				]
 			).then(result => {
-				const [reviewCommits, timelineEvents, reviewComments, defaultBranch] = result;
-				this.fixCommentThreads(timelineEvents, reviewComments);
-				this.fixCommitAttribution(timelineEvents, reviewCommits);
+				const [timelineEvents, defaultBranch] = result;
 				this._panel.webview.postMessage({
 					command: 'pr.initialize',
 					pullrequest: {
@@ -152,59 +146,6 @@ export class PullRequestOverviewPanel {
 		}
 	}
 
-	/**
-	 * For review timeline events, the comments on the event are only those in that review. Any reponses to those comments
-	 * belong to separate reviews. This modifies review timeline event comments to contain both their comments and responses to them.
-	 * @param timelineEvents The timeline events
-	 * @param reviewComments All review comments
-	 */
-	private fixCommentThreads(timelineEvents: TimelineEvent[], reviewComments: Comment[]): void {
-		const reviewEvents: ReviewEvent[] = (<ReviewEvent[]>timelineEvents.filter(event => event.event === EventType.Reviewed));
-
-		reviewEvents.forEach(review => review.comments = []);
-
-		// Group comments by file and position
-		const commentsByFile = groupBy(reviewComments, comment => comment.path);
-		for (let file in commentsByFile) {
-			const fileComments = commentsByFile[file];
-			const commentThreads = groupBy(fileComments, comment => String(comment.position === null ? comment.original_position : comment.position));
-
-			// Loop through threads, for each thread, see if there is a matching review, push all comments to it
-			for (let i in commentThreads) {
-				const comments = commentThreads[i];
-				const reviewId = comments[0].pull_request_review_id;
-
-				if (reviewId) {
-					const matchingEvent = reviewEvents.find(review => review.id === reviewId);
-					if (matchingEvent) {
-						matchingEvent.comments = matchingEvent.comments.concat(comments);
-					}
-				}
-			}
-		}
-	}
-
-	/**
-	 * Commit timeline events only list the bare user commit information, not the details of the associated GitHub user account. Add these details.
-	 * @param timelineEvents The timeline events
-	 * @param commits All review commits
-	 */
-	private fixCommitAttribution(timelineEvents: TimelineEvent[], commits: Commit[]): void {
-		const commitEvents: CommitEvent[] = (<CommitEvent[]>timelineEvents.filter(event => event.event === EventType.Committed));
-		for (let commitEvent of commitEvents) {
-			const matchingCommits = commits.filter(commit => commit.sha === commitEvent.sha);
-			if (matchingCommits.length === 1) {
-				const author = matchingCommits[0].author;
-				// There is not necessarily a GitHub account associated with the commit.
-				if (author !== null) {
-					commitEvent.author.avatar_url = author.avatar_url;
-					commitEvent.author.login = author.login;
-					commitEvent.author.html_url = author.html_url;
-				}
-			}
-		}
-	}
-
 	private async _onDidReceiveMessage(message) {
 		switch (message.command) {
 			case 'alert':
@@ -224,7 +165,39 @@ export class PullRequestOverviewPanel {
 				return this.checkoutDefaultBranch(message.branch);
 			case 'pr.comment':
 				return this.createComment(message.text);
+			case 'pr.edit-comment':
+				return this.editComment(message.comment, message.text);
+			case 'pr.delete-comment':
+				return this.deleteComment(message.comment);
 		}
+	}
+
+	private editComment(comment: vscode.Comment, text: string) {
+		this._pullRequestManager.editComment(this._pullRequest, comment.commentId, text).then(result => {
+			this._panel.webview.postMessage({
+				command: 'pr.update-comment',
+				comment: result
+			});
+		}).catch(e => {
+			// TODO
+			console.log(e);
+		});
+	}
+
+	private deleteComment(comment: vscode.Comment) {
+		vscode.window.showWarningMessage('Are you sure you want to delete this comment?', { modal: true }, 'Delete').then(value => {
+			if (value === 'Delete') {
+				this._pullRequestManager.deleteComment(this._pullRequest, comment.commentId).then(result => {
+					this._panel.webview.postMessage({
+						command: 'pr.update-comment',
+						comment: result
+					});
+				}).catch(e => {
+					// TODO
+					console.log(e);
+				});
+			}
+		});
 	}
 
 	private checkoutPullRequest(): void {

@@ -221,6 +221,8 @@ export class ReviewManager implements vscode.DecorationProvider {
 			this.clear(true);
 			return;
 		}
+		
+		// asdf
 
 		// we switch to another PR, let's clean up first.
 		Logger.appendLine(`Review> current branch ${this._repository.state.HEAD.name} is associated with pull request #${matchingPullRequestMetadata.prNumber}`);
@@ -300,7 +302,9 @@ export class ReviewManager implements vscode.DecorationProvider {
 				commentId: comment.id,
 				body: new vscode.MarkdownString(comment.body),
 				userName: comment.user.login,
-				gravatar: comment.user.avatar_url
+				gravatar: comment.user.avatar_url,
+				canEdit: comment.canEdit,
+				canDelete: comment.canDelete
 			});
 
 			matchedFile.comments.push(comment);
@@ -341,7 +345,9 @@ export class ReviewManager implements vscode.DecorationProvider {
 				commentId: rawComment.id,
 				body: new vscode.MarkdownString(rawComment.body),
 				userName: rawComment.user.login,
-				gravatar: rawComment.user.avatar_url
+				gravatar: rawComment.user.avatar_url,
+				canEdit: rawComment.canEdit,
+				canDelete: rawComment.canDelete
 			};
 
 			let commentThread: vscode.CommentThread = {
@@ -362,6 +368,52 @@ export class ReviewManager implements vscode.DecorationProvider {
 			});
 
 			return commentThread;
+		} catch (e) {
+			throw new Error(formatError(e));
+		}
+	}
+
+	private async editComment(document: vscode.TextDocument, comment: vscode.Comment, text: string): Promise<void> {
+		try {
+			const matchedFile = this.findMatchedFileByUri(document);
+			if (!matchedFile) {
+				throw new Error('Unable to find matching file');
+			}
+
+			const editedComment = await this._prManager.editComment(this._prManager.activePullRequest, comment.commentId, text);
+			const matchingCommentIndex = matchedFile.comments.findIndex(c => c.id === comment.commentId);
+			if (matchingCommentIndex > -1) {
+				matchedFile.comments.splice(matchingCommentIndex, 1, editedComment);
+				// TODO: Send workspace comment threads changed event
+			}
+
+			const otherMatchingCommentIndex = this._comments.findIndex(c => c.id === comment.commentId);
+			if (otherMatchingCommentIndex > -1) {
+				this._comments.splice(otherMatchingCommentIndex, 1, editedComment);
+			}
+		} catch (e) {
+			throw new Error(formatError(e));
+		}
+	}
+
+	private async deleteComment(document: vscode.TextDocument, comment: vscode.Comment): Promise<void> {
+		try {
+			const matchedFile = this.findMatchedFileByUri(document);
+			if (!matchedFile) {
+				throw new Error('Unable to find matching file');
+			}
+
+			await this._prManager.deleteComment(this._prManager.activePullRequest, comment.commentId);
+			const matchingCommentIndex = matchedFile.comments.findIndex(c => c.id === comment.commentId);
+			if (matchingCommentIndex > -1) {
+				matchedFile.comments.splice(matchingCommentIndex, 1);
+				// TODO: Send workspace comment threads changed event
+			}
+
+			const otherMatchingCommentIndex = this._comments.findIndex(c => c.id === comment.commentId);
+			if (otherMatchingCommentIndex > -1) {
+				this._comments.splice(otherMatchingCommentIndex, 1);
+			}
 		} catch (e) {
 			throw new Error(formatError(e));
 		}
@@ -492,7 +544,7 @@ export class ReviewManager implements vscode.DecorationProvider {
 					);
 				}
 
-				const uri = vscode.Uri.parse(change.fileName);
+				const uri = vscode.Uri.file(change.fileName);
 				let changedItem = new GitFileChangeNode(
 					pr,
 					change.status,
@@ -525,7 +577,7 @@ export class ReviewManager implements vscode.DecorationProvider {
 					}
 
 					const oldComments = commentsForFile[fileName];
-					const uri = vscode.Uri.parse(nodePath.join(`commit~${commit.substr(0, 8)}`, fileName));
+					const uri = vscode.Uri.file(nodePath.join(`commit~${commit.substr(0, 8)}`, fileName));
 					const obsoleteFileChange = new GitFileChangeNode(
 						pr,
 						GitChangeType.MODIFY,
@@ -587,7 +639,9 @@ export class ReviewManager implements vscode.DecorationProvider {
 							arguments: [
 								fileChange
 							]
-						}
+						},
+						canEdit: comment.canEdit,
+						canDelete: comment.canDelete
 					};
 				}),
 				collapsibleState: collapsibleState
@@ -637,7 +691,9 @@ export class ReviewManager implements vscode.DecorationProvider {
 						body: new vscode.MarkdownString(comment.body),
 						userName: comment.user.login,
 						gravatar: comment.user.avatar_url,
-						command: command
+						command: command,
+						canEdit: comment.canEdit,
+						canDelete: comment.canDelete
 					};
 				}),
 				collapsibleState: collapsibleState
@@ -822,7 +878,9 @@ export class ReviewManager implements vscode.DecorationProvider {
 									commentId: comment.id,
 									body: new vscode.MarkdownString(comment.body),
 									userName: comment.user.login,
-									gravatar: comment.user.avatar_url
+									gravatar: comment.user.avatar_url,
+									canEdit: comment.canEdit,
+									canDelete: comment.canDelete
 								};
 							}),
 							collapsibleState: vscode.CommentThreadCollapsibleState.Expanded
@@ -835,7 +893,9 @@ export class ReviewManager implements vscode.DecorationProvider {
 				}
 			},
 			createNewCommentThread: this.createNewCommentThread.bind(this),
-			replyToCommentThread: this.replyToCommentThread.bind(this)
+			replyToCommentThread: this.replyToCommentThread.bind(this),
+			editComment: this.editComment.bind(this),
+			deleteComment: this.deleteComment.bind(this)
 		});
 
 		this._workspaceCommentProvider = vscode.workspace.registerWorkspaceCommentProvider({
@@ -848,8 +908,7 @@ export class ReviewManager implements vscode.DecorationProvider {
 					return this.outdatedCommentsToCommentThreads(fileChange, fileChange.comments, vscode.CommentThreadCollapsibleState.Expanded);
 				});
 				return [...comments, ...outdatedComments].reduce((prev, curr) => prev.concat(curr), []);
-			},
-			createNewCommentThread: this.createNewCommentThread.bind(this), replyToCommentThread: this.replyToCommentThread.bind(this)
+			}
 		});
 	}
 

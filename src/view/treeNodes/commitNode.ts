@@ -37,7 +37,7 @@ export class CommitNode extends TreeNode implements vscode.TreeItem {
 		const fileChangeNodes = fileChanges.map(change => {
 			const matchingComments = this.comments.filter(comment => comment.path === change.filename && comment.original_commit_id === this.commit.sha);
 			const fileName = change.filename;
-			const uri = vscode.Uri.parse(path.join(`commit~${this.commit.sha.substr(0, 8)}`, fileName));
+			const uri = vscode.Uri.file(path.join(`commit~${this.commit.sha.substr(0, 8)}`, fileName));
 			const fileChangeNode = new GitFileChangeNode(
 				this.pullRequest,
 				getGitChangeType(change.status),
